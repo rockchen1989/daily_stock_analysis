@@ -152,6 +152,47 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
         p1.search.assert_called_once()
         p2.search.assert_called_once()
 
+    def test_search_stock_news_falls_back_to_week_for_foreign_results(self) -> None:
+        """Foreign-stock news should retry with a 7-day window when 3-day window is empty."""
+        today = datetime.now().date()
+        recent_but_not_3d = (today - timedelta(days=6)).isoformat()
+        response = _response([_result("Klarna expands partnership with retailer", recent_but_not_3d)])
+
+        service = SearchService(
+            bocha_keys=["dummy_key"],
+            searxng_public_instances_enabled=False,
+            news_max_age_days=3,
+            news_strategy_profile="short",
+        )
+        provider = SimpleNamespace(
+            is_available=True,
+            name="P1",
+            search=MagicMock(side_effect=[response, response]),
+        )
+        service._providers = [provider]
+
+        resp = service.search_stock_news("KLAR", "Klarna Group plc", max_results=5)
+        self.assertEqual([r.title for r in resp.results], ["Klarna expands partnership with retailer"])
+        self.assertEqual(provider.search.call_args_list[0][1]["days"], 3)
+        self.assertEqual(provider.search.call_args_list[1][1]["days"], 7)
+
+    def test_search_stock_news_filters_irrelevant_foreign_results(self) -> None:
+        """Foreign-stock news should keep only items that mention the company or code."""
+        today = datetime.now().date().isoformat()
+        service, _ = self._create_service_with_mock_provider(
+            news_max_age_days=7,
+            news_strategy_profile="medium",
+            response=_response(
+                [
+                    _result("Purple Finance To Consider Fund Raising", today),
+                    _result("Klarna expands partnership with retailer", today),
+                ]
+            ),
+        )
+
+        resp = service.search_stock_news("KLAR", "Klarna Group plc", max_results=5)
+        self.assertEqual([r.title for r in resp.results], ["Klarna expands partnership with retailer"])
+
     def test_search_comprehensive_intel_uses_same_filter(self) -> None:
         """Comprehensive intel should use same strict date filtering logic."""
         today = datetime.now().date()

@@ -49,6 +49,7 @@ from src.core.market_review import run_market_review
 from src.webui_frontend import prepare_webui_frontend_assets
 from src.config import get_config, Config
 from src.logging_config import setup_logging
+from src.services.name_to_code_resolver import resolve_stock_inputs
 
 
 logger = logging.getLogger(__name__)
@@ -536,7 +537,15 @@ def main() -> int:
     # 解析股票列表（统一为大写 Issue #355）
     stock_codes = None
     if args.stocks:
-        stock_codes = [canonical_stock_code(c) for c in args.stocks.split(',') if (c or "").strip()]
+        stock_inputs = [c for c in args.stocks.split(',') if (c or "").strip()]
+        stock_codes, unresolved_inputs = resolve_stock_inputs(stock_inputs)
+        stock_codes = [canonical_stock_code(c) for c in stock_codes]
+        stock_codes = list(dict.fromkeys(stock_codes))
+        if unresolved_inputs:
+            logger.warning("Unrecognized --stocks inputs were skipped: %s", ", ".join(unresolved_inputs))
+        if not stock_codes:
+            logger.error("No valid stock inputs could be resolved from --stocks; exiting")
+            sys.exit(1)
         logger.info(f"使用命令行指定的股票列表: {stock_codes}")
 
     # === 处理 --webui / --webui-only 参数，映射到 --serve / --serve-only ===

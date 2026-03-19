@@ -24,6 +24,7 @@ from src.report_language import (
     is_supported_report_language_value,
     normalize_report_language,
 )
+from src.services.name_to_code_resolver import resolve_stock_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -848,11 +849,18 @@ class Config:
         
         # 解析自选股列表（逗号分隔，统一为大写 Issue #355）
         stock_list_str = os.getenv('STOCK_LIST', '')
-        stock_list = [
-            (c or "").strip().upper()
+        stock_list_inputs = [
+            (c or "").strip()
             for c in stock_list_str.split(',')
             if (c or "").strip()
         ]
+        stock_list, unresolved_stock_inputs = resolve_stock_inputs(stock_list_inputs)
+        stock_list = list(dict.fromkeys(stock_list))
+        if unresolved_stock_inputs:
+            logger.warning(
+                "STOCK_LIST 中以下输入无法识别，已跳过: %s",
+                ", ".join(unresolved_stock_inputs),
+            )
         
         # 如果没有配置，使用默认的示例股票
         if not stock_list:
@@ -1796,11 +1804,18 @@ class Config:
         if not stock_list_str:
             stock_list_str = os.getenv('STOCK_LIST', '')
 
-        stock_list = [
-            (c or "").strip().upper()
+        stock_list_inputs = [
+            (c or "").strip()
             for c in stock_list_str.split(',')
             if (c or "").strip()
         ]
+        stock_list, unresolved_stock_inputs = resolve_stock_inputs(stock_list_inputs)
+        stock_list = list(dict.fromkeys(stock_list))
+        if unresolved_stock_inputs:
+            logger.warning(
+                "STOCK_LIST 热刷新时以下输入无法识别，已跳过: %s",
+                ", ".join(unresolved_stock_inputs),
+            )
 
         if not stock_list:
             stock_list = ['000001']

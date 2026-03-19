@@ -30,6 +30,9 @@ class TestIsCodeLike:
     def test_suffix_lowercase(self):
         assert is_code_like("600519.sh") is True
 
+    def test_suffix_hk(self):
+        assert is_code_like("0700.HK") is True
+
     # --- Exchange prefix format (Issue #6 fix) ---
     def test_prefix_sh_upper(self):
         assert is_code_like("SH600519") is True
@@ -84,6 +87,9 @@ class TestNormalizeCode:
 
     def test_suffix_ss_strips(self):
         assert normalize_code("600000.SS") == "600000"
+
+    def test_suffix_hk_zero_pads(self):
+        assert normalize_code("700.HK") == "00700"
 
     # --- Exchange prefix format (Issue #6 fix) ---
     def test_prefix_sh_upper(self):

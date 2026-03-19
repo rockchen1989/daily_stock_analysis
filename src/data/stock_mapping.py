@@ -89,6 +89,7 @@ STOCK_NAME_MAP = {
     "LI": "理想汽车",
     "COIN": "Coinbase",
     "MSTR": "MicroStrategy",
+    "KLAR": "Klarna Group plc",
     # === HK stocks (5-digit) ===
     "00700": "腾讯控股",
     "03690": "美团",
@@ -104,6 +105,25 @@ STOCK_NAME_MAP = {
     "01299": "友邦保险",
     "00941": "中国移动",
     "00883": "中国海洋石油",
+}
+
+
+# Optional company-name aliases for reverse lookup. Ambiguous aliases are filtered
+# out by the resolver and will not be auto-mapped.
+STOCK_NAME_ALIASES = {
+    "AAPL": ("Apple", "Apple Inc", "Apple Inc."),
+    "TSLA": ("Tesla", "Tesla Inc", "Tesla Inc."),
+    "MSFT": ("Microsoft", "Microsoft Corp", "Microsoft Corporation"),
+    "GOOGL": ("Alphabet Class A",),
+    "GOOG": ("Alphabet Class C",),
+    "AMZN": ("Amazon", "Amazon.com", "Amazon.com Inc", "Amazon.com Inc."),
+    "NVDA": ("NVIDIA", "Nvidia", "NVIDIA Corp", "NVIDIA Corporation"),
+    "META": ("Meta Platforms", "Meta Platforms Inc", "Facebook", "Facebook Inc"),
+    "AMD": ("Advanced Micro Devices", "Advanced Micro Devices Inc"),
+    "INTC": ("Intel", "Intel Corp", "Intel Corporation"),
+    "COIN": ("Coinbase Global", "Coinbase Global Inc"),
+    "MSTR": ("MicroStrategy Inc", "Strategy"),
+    "KLAR": ("Klarna", "Klarna Group", "Klarna Group plc"),
 }
 
 

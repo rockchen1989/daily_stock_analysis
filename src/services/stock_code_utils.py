@@ -36,9 +36,17 @@ def is_code_like(value: str) -> bool:
         return False
     if text.isdigit() and len(text) in (5, 6):
         return True
-    for suffix in (".SH", ".SZ", ".SS"):
+    for suffix in (".SH", ".SZ", ".SS", ".HK", ".BJ"):
         if text.endswith(suffix):
             base = text[: -len(suffix)].strip()
+            if suffix == ".HK":
+                if base.isdigit() and 1 <= len(base) <= 5:
+                    return True
+                continue
+            if suffix == ".BJ":
+                if base.isdigit() and len(base) == 6:
+                    return True
+                continue
             if base.isdigit() and len(base) in (5, 6):
                 return True
     if re.match(r"^[A-Z]{1,5}(\.[A-Z])?$", text):
@@ -65,9 +73,17 @@ def normalize_code(raw: str) -> Optional[str]:
         return text
     if re.match(r"^[A-Z]{1,5}(\.[A-Z])?$", text):
         return text
-    for suffix in (".SH", ".SZ", ".SS"):
+    for suffix in (".SH", ".SZ", ".SS", ".HK", ".BJ"):
         if text.endswith(suffix):
             base = text[: -len(suffix)].strip()
+            if suffix == ".HK":
+                if base.isdigit() and 1 <= len(base) <= 5:
+                    return base.zfill(5)
+                continue
+            if suffix == ".BJ":
+                if base.isdigit() and len(base) == 6:
+                    return base
+                continue
             if base.isdigit() and len(base) in (5, 6):
                 return base
     # Support exchange-prefixed codes: SH600519 -> 600519, HK00700 -> 00700

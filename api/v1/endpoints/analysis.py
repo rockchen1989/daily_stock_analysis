@@ -49,6 +49,7 @@ from api.v1.schemas.history import (
 from data_provider.base import canonical_stock_code
 from src.config import Config
 from src.report_language import get_localized_stock_name, normalize_report_language
+from src.services.name_to_code_resolver import resolve_stock_inputs
 from src.services.task_queue import (
     get_task_queue,
     DuplicateTaskError,
@@ -129,8 +130,20 @@ def trigger_analysis(
         )
 
     # 统一大小写后去重，确保 ['aapl', 'AAPL'] 被识别为同一股票（Issue #355）
-    stock_codes = [canonical_stock_code(c) for c in stock_codes]
-    stock_codes = [c for c in stock_codes if c]
+    resolved_codes, unresolved_inputs = resolve_stock_inputs(stock_codes)
+    if unresolved_inputs:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "validation_error",
+                "message": (
+                    "无法识别以下股票输入，请使用股票代码或更完整的公司名: "
+                    + ", ".join(unresolved_inputs)
+                ),
+            },
+        )
+
+    stock_codes = [canonical_stock_code(c) for c in resolved_codes]
     stock_codes = list(dict.fromkeys(stock_codes))
 
     if not stock_codes:

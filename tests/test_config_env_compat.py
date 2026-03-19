@@ -166,6 +166,24 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
 
         self.assertEqual(config.report_language, "en")
 
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_stock_list_resolves_company_names_to_codes(
+        self,
+        _mock_parse_yaml,
+        _mock_setup_env,
+    ) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "STOCK_LIST": "Klarna,AAPL",
+            },
+            clear=True,
+        ):
+            config = Config._load_from_env()
+
+        self.assertEqual(config.stock_list, ["KLAR", "AAPL"])
+
     def test_parse_report_language_accepts_known_alias_without_warning(self) -> None:
         with self.assertNoLogs("src.config", level="WARNING"):
             parsed = Config._parse_report_language("zh-cn")

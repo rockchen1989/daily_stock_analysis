@@ -50,6 +50,22 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             ReportType.FULL,
         )
 
+    def test_analysis_service_resolves_company_name_before_pipeline(self) -> None:
+        service = object.__new__(AnalysisService)
+        pipeline_instance = MagicMock()
+        pipeline_instance.process_single_stock.return_value = object()
+
+        with patch("src.config.get_config", return_value=SimpleNamespace()), \
+             patch("src.core.pipeline.StockAnalysisPipeline", return_value=pipeline_instance), \
+             patch.object(AnalysisService, "_build_analysis_response", return_value={"stock_code": "KLAR"}):
+            result = AnalysisService.analyze_stock(service, "Klarna", report_type="full", query_id="q1")
+
+        self.assertEqual(result, {"stock_code": "KLAR"})
+        self.assertEqual(
+            pipeline_instance.process_single_stock.call_args.kwargs["code"],
+            "KLAR",
+        )
+
     def test_report_type_full_is_preserved_in_response_metadata(self) -> None:
         service = AnalysisService()
         pipeline_instance = MagicMock()
@@ -229,6 +245,25 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             ctx.exception.detail["message"],
             "股票代码不能为空或仅包含空白字符",
         )
+
+    def test_trigger_analysis_resolves_company_name_before_sync_handler(self) -> None:
+        if trigger_analysis is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        with patch("api.v1.endpoints.analysis._handle_sync_analysis", return_value={"stock_code": "KLAR"}) as mock_sync:
+            result = trigger_analysis(
+                request=SimpleNamespace(
+                    stock_code="Klarna",
+                    stock_codes=None,
+                    report_type="detailed",
+                    force_refresh=False,
+                    async_mode=False,
+                ),
+                config=SimpleNamespace(),
+            )
+
+        self.assertEqual(result, {"stock_code": "KLAR"})
+        self.assertEqual(mock_sync.call_args.args[0], "KLAR")
 
     def test_spa_fallback_returns_json_404_for_bare_api_path(self) -> None:
         if create_app is None:

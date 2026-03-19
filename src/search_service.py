@@ -268,6 +268,28 @@ class TavilySearchProvider(BaseSearchProvider):
     
     def __init__(self, api_keys: List[str]):
         super().__init__(api_keys, "Tavily")
+
+    @staticmethod
+    def _infer_topic(query: str) -> Optional[str]:
+        """Use Tavily news mode for news-like queries."""
+        lowered = (query or "").lower()
+        news_markers = (
+            "latest news",
+            " news",
+            "headline",
+            "headlines",
+            "breaking",
+            "earnings",
+            "quarterly results",
+            "消息",
+            "新闻",
+            "资讯",
+            "公告",
+            "财报",
+        )
+        if any(marker in lowered for marker in news_markers):
+            return "news"
+        return None
     
     def _do_search(self, query: str, api_key: str, max_results: int, days: int = 7) -> SearchResponse:
         """执行 Tavily 搜索"""
@@ -284,6 +306,7 @@ class TavilySearchProvider(BaseSearchProvider):
         
         try:
             client = TavilyClient(api_key=api_key)
+            topic = self._infer_topic(query)
             
             # 执行搜索（优化：使用advanced深度、限制最近几天）
             response = client.search(
@@ -292,6 +315,7 @@ class TavilySearchProvider(BaseSearchProvider):
                 max_results=max_results,
                 include_answer=False,
                 include_raw_content=False,
+                topic=topic,
                 days=days,  # 搜索最近天数的内容
             )
             
@@ -307,7 +331,11 @@ class TavilySearchProvider(BaseSearchProvider):
                     snippet=item.get('content', '')[:500],  # 截取前500字
                     url=item.get('url', ''),
                     source=self._extract_domain(item.get('url', '')),
-                    published_date=item.get('published_date'),
+                    published_date=(
+                        item.get('published_date')
+                        or item.get('publishedDate')
+                        or item.get('date')
+                    ),
                 ))
             
             return SearchResponse(
@@ -1666,6 +1694,7 @@ class SearchService:
         self._cache: Dict[str, Tuple[float, 'SearchResponse']] = {}
         # Default cache TTL in seconds (10 minutes)
         self._cache_ttl: int = 600
+
         logger.info(
             "新闻时效策略已启用: profile=%s, profile_days=%s, NEWS_MAX_AGE_DAYS=%s, effective_window=%s",
             self.news_strategy_profile,
@@ -1975,6 +2004,112 @@ class SearchService:
             error_message=response.error_message,
             search_time=response.search_time,
         )
+
+    @staticmethod
+    def _simplify_company_name(stock_name: str) -> str:
+        """Trim common legal suffixes to get a cleaner search term."""
+        text = (stock_name or "").strip()
+        if not text:
+            return ""
+
+        simplified = re.sub(
+            r"\b(class\s+[a-z]+|group|holdings?|plc|inc\.?|corp\.?|corporation|limited|ltd\.?|co\.?|company|sa|ag|nv|se)\b",
+            " ",
+            text,
+            flags=re.IGNORECASE,
+        )
+        simplified = re.sub(r"\s+", " ", simplified).strip(" ,.-")
+        return simplified or text
+
+    @classmethod
+    def _contains_search_term(cls, text: str, term: str) -> bool:
+        if not text or not term:
+            return False
+        if re.search(r"[\u4e00-\u9fff]", term):
+            return term in text
+        return bool(
+            re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text, flags=re.IGNORECASE)
+        )
+
+    @classmethod
+    def _build_news_match_terms(cls, stock_code: str, stock_name: str) -> List[str]:
+        terms: List[str] = []
+        for candidate in (
+            (stock_code or "").strip(),
+            (stock_name or "").strip(),
+            cls._simplify_company_name(stock_name),
+        ):
+            if candidate and candidate not in terms:
+                terms.append(candidate)
+        return terms
+
+    def _filter_relevant_news_response(
+        self,
+        response: SearchResponse,
+        *,
+        stock_code: str,
+        stock_name: str,
+        max_results: int,
+        log_scope: str,
+    ) -> SearchResponse:
+        """Drop noisy foreign-stock news that does not mention the company or code."""
+        if not response.success or not response.results or not self._is_foreign_stock(stock_code):
+            return response
+
+        terms = self._build_news_match_terms(stock_code, stock_name)
+        kept: List[SearchResult] = []
+        dropped_irrelevant = 0
+
+        for item in response.results:
+            haystack = " ".join(filter(None, [item.title, item.snippet, item.url])).lower()
+            if any(self._contains_search_term(haystack, term.lower()) for term in terms):
+                kept.append(item)
+                if len(kept) >= max_results:
+                    break
+            else:
+                dropped_irrelevant += 1
+
+        if dropped_irrelevant:
+            logger.info(
+                "[news relevance] %s: provider=%s, total=%s, kept=%s, dropped_irrelevant=%s",
+                log_scope,
+                response.provider,
+                len(response.results),
+                len(kept),
+                dropped_irrelevant,
+            )
+
+        return SearchResponse(
+            query=response.query,
+            results=kept,
+            provider=response.provider,
+            success=response.success,
+            error_message=response.error_message,
+            search_time=response.search_time,
+        )
+
+    def _build_stock_news_queries(
+        self,
+        *,
+        stock_code: str,
+        stock_name: str,
+        focus_keywords: Optional[List[str]] = None,
+    ) -> List[str]:
+        if focus_keywords:
+            return [" ".join(focus_keywords)]
+
+        if self._is_foreign_stock(stock_code):
+            simplified_name = self._simplify_company_name(stock_name)
+            queries = [f"{stock_name} {stock_code} stock latest news"]
+            for candidate in (
+                f"{simplified_name} {stock_code} latest news",
+                f"{simplified_name} latest news",
+            ):
+                if candidate not in queries:
+                    queries.append(candidate)
+            return queries
+
+        return [f"{stock_name} {stock_code} 股票 最新消息"]
     
     def search_stock_news(
         self,
@@ -2027,8 +2162,15 @@ class SearchService:
             provider_max_results,
         )
 
+        query_candidates = self._build_stock_news_queries(
+            stock_code=stock_code,
+            stock_name=stock_name,
+            focus_keywords=focus_keywords,
+        )
+        query = query_candidates[0]
+
         # Check cache first
-        cache_key = self._cache_key(query, max_results, search_days)
+        cache_key = self._cache_key(" || ".join(query_candidates), max_results, search_days)
         cached = self._get_cached(cache_key)
         if cached is not None:
             logger.info(f"使用缓存搜索结果: {stock_name}({stock_code})")
@@ -2047,7 +2189,38 @@ class SearchService:
                 max_results=max_results,
                 log_scope=f"{stock_code}:{provider.name}:stock_news",
             )
+            filtered_response = self._filter_relevant_news_response(
+                filtered_response,
+                stock_code=stock_code,
+                stock_name=stock_name,
+                max_results=max_results,
+                log_scope=f"{stock_code}:{provider.name}:stock_news",
+            )
             had_provider_success = had_provider_success or bool(response.success)
+
+            if response.success and not filtered_response.results and is_foreign and search_days < 7:
+                fallback_days = 7
+                fallback_response = provider.search(query, provider_max_results, days=fallback_days)
+                fallback_filtered = self._filter_news_response(
+                    fallback_response,
+                    search_days=fallback_days,
+                    max_results=max_results,
+                    log_scope=f"{stock_code}:{provider.name}:stock_news:fallback",
+                )
+                fallback_filtered = self._filter_relevant_news_response(
+                    fallback_filtered,
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                    max_results=max_results,
+                    log_scope=f"{stock_code}:{provider.name}:stock_news:fallback",
+                )
+                had_provider_success = had_provider_success or bool(fallback_response.success)
+                if fallback_filtered.success and fallback_filtered.results:
+                    logger.info("%s 鎼滅储鍥炶惤鍒?7 澶╃獥鍙ｅ悗鎵惧埌鏈夋晥鏂伴椈", provider.name)
+                    self._put_cache(cache_key, fallback_filtered)
+                    return fallback_filtered
+                filtered_response = fallback_filtered
+                response = fallback_response
 
             if filtered_response.success and filtered_response.results:
                 logger.info(f"使用 {provider.name} 搜索成功")
