@@ -37,6 +37,7 @@ venv/
 ENV/
 env/
 .venv/
+.venv-wsl/
 
 # IDE
 .idea/
@@ -62,6 +63,9 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+.pip-cache/
+.tmp/
+apps/.npm-cache/
 
 local/
 
